@@ -17,6 +17,10 @@ import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.theme.BitChordTheme
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.music.bitchord.ui.components.FLOATING_BAR_MAX_WIDTH
+import com.music.bitchord.ui.components.FrostedTopBar
+import com.music.bitchord.ui.screens.HomeScreen
 
 fun main() = application {
     Window(
@@ -41,7 +45,9 @@ fun main() = application {
 @Composable
 private fun DesktopApp() {
     var selectedTab by remember { mutableIntStateOf(0) }
+
     val hazeState = remember { HazeState() }
+    val homeListState = rememberLazyListState()
 
     val tabs = remember {
         listOf(
@@ -56,15 +62,31 @@ private fun DesktopApp() {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(hazeState)
-                .padding(bottom = 96.dp),
-            contentAlignment = Alignment.Center,
+                .hazeSource(hazeState),
         ) {
-            Text(
-                text = tabs[selectedTab].label,
-                style = MaterialTheme.typography.displayLarge,
-            )
+            when (selectedTab) {
+                0 -> HomeScreen(
+                    listState = homeListState,
+                )
+
+                else -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 64.dp, bottom = 96.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = tabs[selectedTab].label,
+                        style = MaterialTheme.typography.displayLarge,
+                    )
+                }
+            }
         }
+
+        FrostedTopBar(
+            hazeState = hazeState,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
 
         FloatingBottomBar(
             tabs = tabs,
@@ -73,7 +95,7 @@ private fun DesktopApp() {
             hazeState = hazeState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .widthIn(max = 440.dp)
+                .widthIn(max = FLOATING_BAR_MAX_WIDTH)
                 .fillMaxWidth(),
         )
     }
