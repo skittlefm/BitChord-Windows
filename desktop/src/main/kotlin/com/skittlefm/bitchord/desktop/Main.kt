@@ -21,6 +21,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import com.music.bitchord.ui.components.FLOATING_BAR_MAX_WIDTH
 import com.music.bitchord.ui.components.FrostedTopBar
 import com.music.bitchord.ui.screens.HomeScreen
+import com.music.bitchord.data.DebugLog
+import com.music.bitchord.data.HomeRepository
+import com.music.bitchord.data.innertube.Innertube
+import com.music.bitchord.data.model.HomeFeed
+import com.music.bitchord.data.model.UiState
+import kotlinx.coroutines.CancellationException
 
 fun main() = application {
     Window(
@@ -48,6 +54,33 @@ private fun DesktopApp() {
 
     val hazeState = remember { HazeState() }
     val homeListState = rememberLazyListState()
+    var homeState by remember {
+        mutableStateOf<UiState<HomeFeed>>(UiState.Loading)
+    }
+
+    var homeRequest by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(homeRequest) {
+        homeState = UiState.Loading
+
+        try {
+            homeState = UiState.Success(HomeRepository.home())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            DebugLog.e("Home", "Falha ao carregar o feed", error)
+
+            homeState = UiState.Error(
+                "Não foi possível carregar o início. Tente novamente.",
+            )
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            Innertube.close()
+        }
+    }
 
     val tabs = remember {
         listOf(
@@ -66,7 +99,9 @@ private fun DesktopApp() {
         ) {
             when (selectedTab) {
                 0 -> HomeScreen(
+                    state = homeState,
                     listState = homeListState,
+                    onRetry = { homeRequest++ },
                 )
 
                 else -> Box(
