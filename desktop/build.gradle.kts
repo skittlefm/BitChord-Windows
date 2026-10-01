@@ -18,6 +18,9 @@ kotlin {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation("org.jetbrains.compose.material3:material3:1.9.0")
+
+    implementation("dev.chrisbanes.haze:haze:1.3.1")
+    implementation("dev.chrisbanes.haze:haze-materials:1.3.1")
 }
 
 compose.desktop {
