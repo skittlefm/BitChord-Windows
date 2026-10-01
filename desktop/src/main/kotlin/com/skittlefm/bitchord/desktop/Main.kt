@@ -27,6 +27,9 @@ import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.model.HomeFeed
 import com.music.bitchord.data.model.UiState
 import kotlinx.coroutines.CancellationException
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.music.bitchord.data.model.ShelfItem
+import com.music.bitchord.ui.screens.DetailScreen
 
 fun main() = application {
     Window(
@@ -51,6 +54,9 @@ fun main() = application {
 @Composable
 private fun DesktopApp() {
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    var openedItem by remember { mutableStateOf<ShelfItem?>(null) }
+    val savedScreens = rememberSaveableStateHolder()
 
     val hazeState = remember { HazeState() }
     val homeListState = rememberLazyListState()
@@ -97,23 +103,38 @@ private fun DesktopApp() {
                 .fillMaxSize()
                 .hazeSource(hazeState),
         ) {
-            when (selectedTab) {
-                0 -> HomeScreen(
-                    state = homeState,
-                    listState = homeListState,
-                    onRetry = { homeRequest++ },
-                )
+            val detail = openedItem
 
-                else -> Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 64.dp, bottom = 96.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = tabs[selectedTab].label,
-                        style = MaterialTheme.typography.displayLarge,
-                    )
+            when {
+                detail != null -> {
+                    key(detail.browseId) {
+                        DetailScreen(item = detail)
+                    }
+                }
+
+                selectedTab == 0 -> {
+                    savedScreens.SaveableStateProvider("home") {
+                        HomeScreen(
+                            state = homeState,
+                            listState = homeListState,
+                            onRetry = { homeRequest++ },
+                            onItemClick = { openedItem = it },
+                        )
+                    }
+                }
+
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 64.dp, bottom = 96.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = tabs[selectedTab].label,
+                            style = MaterialTheme.typography.displayLarge,
+                        )
+                    }
                 }
             }
         }
@@ -121,12 +142,20 @@ private fun DesktopApp() {
         FrostedTopBar(
             hazeState = hazeState,
             modifier = Modifier.align(Alignment.TopCenter),
+            onBack = if (openedItem != null) {
+                { openedItem = null }
+            } else {
+                null
+            },
         )
 
         FloatingBottomBar(
             tabs = tabs,
             selectedIndex = selectedTab,
-            onTabSelected = { selectedTab = it },
+            onTabSelected = {
+                selectedTab = it
+                openedItem = null
+            },
             hazeState = hazeState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)

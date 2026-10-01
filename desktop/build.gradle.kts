@@ -35,6 +35,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
 
+    implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
+
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.18")
 }
 
@@ -57,4 +59,13 @@ tasks.withType<JavaExec>().configureEach {
     systemProperty("file.encoding", "UTF-8")
     systemProperty("stdout.encoding", "UTF-8")
     systemProperty("stderr.encoding", "UTF-8")
+}
+
+tasks.register<JavaExec>("checkDetail") {
+    group = "verification"
+    description = "Consulta as faixas de uma playlist ou álbum."
+
+    dependsOn("classes")
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.skittlefm.bitchord.desktop.DetailCheck")
 }

@@ -25,12 +25,14 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.music.bitchord.data.model.*
 import com.music.bitchord.ui.components.*
+import androidx.compose.foundation.clickable
 
 @Composable
 fun HomeScreen(
     state: UiState<HomeFeed>,
     listState: LazyListState,
     onRetry: () -> Unit,
+    onItemClick: (ShelfItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -87,6 +89,7 @@ fun HomeScreen(
                         HomeShelfRow(
                             shelf = shelf,
                             hero = index == 0,
+                            onItemClick = onItemClick,
                         )
                     }
                 }
@@ -99,6 +102,7 @@ fun HomeScreen(
 private fun HomeShelfRow(
     shelf: HomeShelf,
     hero: Boolean,
+    onItemClick: (ShelfItem) -> Unit,
 ) {
     Column(modifier = Modifier.padding(bottom = 26.dp)) {
         Column(
@@ -137,15 +141,28 @@ private fun HomeShelfRow(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(shelf.items) { item ->
+                    val browseId = item.browseId.orEmpty()
+
+                    val cardModifier = Modifier
+                        .width(cardWidth)
+                        .clip(RoundedCornerShape(if (hero) 18.dp else 12.dp))
+                        .clickable(
+                            enabled = browseId.startsWith("VL") ||
+                                    browseId.startsWith("MPREb"),
+                            onClickLabel = "Abrir ${item.title}",
+                        ) {
+                            onItemClick(item)
+                        }
+
                     if (hero) {
                         HomeHeroCard(
                             item = item,
-                            modifier = Modifier.width(cardWidth),
+                            modifier = cardModifier,
                         )
                     } else {
                         HomeShelfCard(
                             item = item,
-                            modifier = Modifier.width(cardWidth),
+                            modifier = cardModifier,
                         )
                     }
                 }

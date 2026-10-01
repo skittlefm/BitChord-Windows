@@ -14,6 +14,10 @@ import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalHazeMaterialsApi::class)
@@ -22,6 +26,7 @@ fun FrostedTopBar(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
     reduceDynamicBlur: Boolean = false,
+    onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val container = MaterialTheme.colorScheme.surface
@@ -42,17 +47,32 @@ fun FrostedTopBar(
                     },
                 ),
         ) {
-            Image(
-                painter = painterResource("drawable/ic_logo.xml"),
-                contentDescription = "BitChord",
-                colorFilter = ColorFilter.tint(
-                    MaterialTheme.colorScheme.onSurface,
-                ),
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 16.dp)
-                    .height(18.dp),
-            )
+            if (onBack != null) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Voltar",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            } else {
+                Image(
+                    painter = painterResource("drawable/ic_logo.xml"),
+                    contentDescription = "BitChord",
+                    colorFilter = ColorFilter.tint(
+                        MaterialTheme.colorScheme.onSurface,
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 16.dp)
+                        .height(18.dp),
+                )
+            }
 
             Row(
                 modifier = Modifier
