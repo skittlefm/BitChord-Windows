@@ -23,10 +23,14 @@ import com.music.bitchord.data.model.*
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.songListSkeleton
 import kotlinx.coroutines.CancellationException
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.Dp
 
 @Composable
 fun DetailScreen(
     item: ShelfItem,
+    onPlay: (List<Song>, Int) -> Unit,
+    bottomPadding: Dp = 140.dp,
     modifier: Modifier = Modifier,
 ) {
     val browseId = requireNotNull(item.browseId)
@@ -91,7 +95,7 @@ fun DetailScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 140.dp),
+            contentPadding = PaddingValues(bottom = bottomPadding),
         ) {
             item(key = "detail:header") {
                 Box(
@@ -165,6 +169,14 @@ fun DetailScreen(
                     song = song,
                     trackNumber = if (numbered) index + 1 else null,
                     fallbackCover = cover,
+                    onClick = {
+                        onPlay(
+                            songs.map {
+                                it.copy(thumbnailUrl = it.thumbnailUrl ?: cover)
+                            },
+                            index,
+                        )
+                    },
                 )
             }
 
@@ -230,12 +242,14 @@ private fun DetailSongRow(
     song: Song,
     trackNumber: Int?,
     fallbackCover: String?,
+    onClick: () -> Unit,
 ) {
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

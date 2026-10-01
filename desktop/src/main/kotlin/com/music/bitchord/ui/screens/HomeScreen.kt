@@ -26,6 +26,7 @@ import coil3.request.crossfade
 import com.music.bitchord.data.model.*
 import com.music.bitchord.ui.components.*
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.Dp
 
 @Composable
 fun HomeScreen(
@@ -33,6 +34,7 @@ fun HomeScreen(
     listState: LazyListState,
     onRetry: () -> Unit,
     onItemClick: (ShelfItem) -> Unit,
+    bottomPadding: Dp = 140.dp,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -40,7 +42,7 @@ fun HomeScreen(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = TopBarContentHeight + TopBarContentGap,
-            bottom = 140.dp,
+            bottom = bottomPadding,
         ),
     ) {
         item(key = "home:title") {

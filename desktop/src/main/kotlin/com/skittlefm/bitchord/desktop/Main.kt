@@ -1,39 +1,59 @@
 package com.skittlefm.bitchord.desktop
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.music.bitchord.ui.components.BottomTab
-import com.music.bitchord.ui.components.FloatingBottomBar
-import com.music.bitchord.ui.icons.BitChordIcons
-import com.music.bitchord.ui.theme.BitChordTheme
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
-import androidx.compose.foundation.lazy.rememberLazyListState
-import com.music.bitchord.ui.components.FLOATING_BAR_MAX_WIDTH
-import com.music.bitchord.ui.components.FrostedTopBar
-import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.data.DebugLog
 import com.music.bitchord.data.HomeRepository
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.model.HomeFeed
-import com.music.bitchord.data.model.UiState
-import kotlinx.coroutines.CancellationException
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.music.bitchord.data.model.ShelfItem
+import com.music.bitchord.data.model.UiState
+import com.music.bitchord.ui.components.*
+import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.screens.DetailScreen
+import com.music.bitchord.ui.screens.HomeScreen
+import com.music.bitchord.ui.theme.BitChordTheme
+import com.skittlefm.bitchord.desktop.playback.DesktopPlayer
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 fun main() = application {
+    val player = remember { DesktopPlayer() }
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = {
+            if (!closing) {
+                closing = true
+
+                scope.launch {
+                    try {
+                        player.close()
+                    } finally {
+                        try {
+                            Innertube.close()
+                        } finally {
+                            exitApplication()
+                        }
+                    }
+                }
+            }
+        },
+        visible = !closing,
         title = "BitChord Windows",
         state = rememberWindowState(
             width = 1100.dp,
@@ -45,25 +65,48 @@ fun main() = application {
                 modifier = Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.background,
             ) {
-                DesktopApp()
+                DesktopApp(player)
             }
         }
     }
 }
 
 @Composable
-private fun DesktopApp() {
+private fun DesktopApp(player: DesktopPlayer) {
+    val playback by player.state.collectAsState()
+    val messages = remember { SnackbarHostState() }
+
+    var bottomHeight by remember { mutableIntStateOf(0) }
+
+    val bottomPadding = maxOf(
+        140.dp,
+        with(LocalDensity.current) { bottomHeight.toDp() } + 16.dp,
+    )
+
+    LaunchedEffect(playback.error) {
+        playback.error?.let { message ->
+            val result = messages.showSnackbar(
+                message = message,
+                actionLabel = "Tentar novamente",
+                withDismissAction = true,
+            )
+
+            if (result == SnackbarResult.ActionPerformed) {
+                player.retry()
+            }
+        }
+    }
+
     var selectedTab by remember { mutableIntStateOf(0) }
-
     var openedItem by remember { mutableStateOf<ShelfItem?>(null) }
-    val savedScreens = rememberSaveableStateHolder()
 
+    val savedScreens = rememberSaveableStateHolder()
     val hazeState = remember { HazeState() }
     val homeListState = rememberLazyListState()
+
     var homeState by remember {
         mutableStateOf<UiState<HomeFeed>>(UiState.Loading)
     }
-
     var homeRequest by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(homeRequest) {
@@ -79,12 +122,6 @@ private fun DesktopApp() {
             homeState = UiState.Error(
                 "Não foi possível carregar o início. Tente novamente.",
             )
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            Innertube.close()
         }
     }
 
@@ -108,7 +145,11 @@ private fun DesktopApp() {
             when {
                 detail != null -> {
                     key(detail.browseId) {
-                        DetailScreen(item = detail)
+                        DetailScreen(
+                            item = detail,
+                            onPlay = player::play,
+                            bottomPadding = bottomPadding,
+                        )
                     }
                 }
 
@@ -119,6 +160,7 @@ private fun DesktopApp() {
                             listState = homeListState,
                             onRetry = { homeRequest++ },
                             onItemClick = { openedItem = it },
+                            bottomPadding = bottomPadding,
                         )
                     }
                 }
@@ -149,18 +191,37 @@ private fun DesktopApp() {
             },
         )
 
-        FloatingBottomBar(
-            tabs = tabs,
-            selectedIndex = selectedTab,
-            onTabSelected = {
-                selectedTab = it
-                openedItem = null
-            },
-            hazeState = hazeState,
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .widthIn(max = FLOATING_BAR_MAX_WIDTH)
-                .fillMaxWidth(),
-        )
+                .fillMaxWidth()
+                .onSizeChanged { bottomHeight = it.height },
+        ) {
+            SnackbarHost(hostState = messages)
+
+            if (playback.song != null) {
+                MiniPlayer(
+                    state = playback,
+                    hazeState = hazeState,
+                    onPlayPause = player::togglePlayPause,
+                    onNext = player::next,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(Modifier.height(8.dp))
+            }
+
+            FloatingBottomBar(
+                tabs = tabs,
+                selectedIndex = selectedTab,
+                onTabSelected = {
+                    selectedTab = it
+                    openedItem = null
+                },
+                hazeState = hazeState,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }

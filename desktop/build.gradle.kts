@@ -41,6 +41,8 @@ dependencies {
 
     implementation("com.github.MetrolistGroup.innertubex:innertubex-desktop:v0.7.0")
 
+    implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
+
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.18")
 }
 
