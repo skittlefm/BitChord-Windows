@@ -39,6 +39,8 @@ dependencies {
 
     implementation("uk.co.caprica:vlcj:4.11.0")
 
+    implementation("com.github.MetrolistGroup.innertubex:innertubex-desktop:v0.7.0")
+
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.18")
 }
 
@@ -79,4 +81,15 @@ tasks.register<JavaExec>("checkAudio") {
     dependsOn("classes")
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.skittlefm.bitchord.desktop.AudioCheck")
+}
+
+tasks.register<JavaExec>("checkStream") {
+    group = "verification"
+    description = "Testa a reprodução de uma música do YouTube Music."
+
+    dependsOn("classes")
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.skittlefm.bitchord.desktop.StreamCheck")
+
+    args(providers.gradleProperty("videoId").getOrElse(""))
 }
