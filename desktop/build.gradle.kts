@@ -37,6 +37,8 @@ dependencies {
 
     implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
 
+    implementation("uk.co.caprica:vlcj:4.11.0")
+
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.18")
 }
 
@@ -68,4 +70,13 @@ tasks.register<JavaExec>("checkDetail") {
     dependsOn("classes")
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.skittlefm.bitchord.desktop.DetailCheck")
+}
+
+tasks.register<JavaExec>("checkAudio") {
+    group = "verification"
+    description = "Testa reprodução, pausa e retomada de áudio no Windows."
+
+    dependsOn("classes")
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.skittlefm.bitchord.desktop.AudioCheck")
 }
