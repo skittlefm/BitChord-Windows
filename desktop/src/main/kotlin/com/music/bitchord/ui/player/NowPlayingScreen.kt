@@ -54,6 +54,8 @@ fun NowPlayingScreen(
     onNext: () -> Unit,
     onSeek: (Long, Long) -> Unit,
     onVolume: (Int) -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
     onQueueSelect: (String, Long) -> Unit,
     onQueueRemove: (String, Long) -> Unit,
     onQueueMove: (String, String, Long) -> Unit,
@@ -86,6 +88,12 @@ fun NowPlayingScreen(
 
     val queueAction: @Composable () -> Unit = {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            if (queueOpen) {
+                PlaybackModes(
+                    state, onToggleShuffle, onCycleRepeat,
+                    Modifier.align(Alignment.Center),
+                )
+            }
             QueueToggle(open = queueOpen, onClick = { queueOpen = !queueOpen })
         }
     }

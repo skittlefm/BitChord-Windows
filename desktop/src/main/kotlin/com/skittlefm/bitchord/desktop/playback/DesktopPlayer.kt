@@ -1,6 +1,7 @@
 package com.skittlefm.bitchord.desktop.playback
 
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.QueueTier
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,8 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+
+enum class RepeatMode { OFF, ALL, ONE }
 
 data class PlaybackState(
     val queue: List<Song> = emptyList(),
@@ -31,9 +34,19 @@ data class PlaybackState(
     val durationMs: Long = 0,
     val isSeekable: Boolean = false,
     val volume: Int = 100,
+    val shuffleEnabled: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.OFF,
 ) {
     val song: Song? get() = queue.getOrNull(index)
-    val hasNext: Boolean get() = index >= 0 && index < queue.lastIndex
+    // Próxima manual ignora repetir uma; repetir a fila permite voltar ao início.
+    val nextIndex: Int?
+        get() = when {
+            index !in queue.indices -> null
+            index < queue.lastIndex -> index + 1
+            repeatMode == RepeatMode.ALL -> 0
+            else -> null
+        }
+    val hasNext: Boolean get() = nextIndex != null
     val canSeek: Boolean
         get() = isSeekable && durationMs > 0 && !isLoading && error == null
 }
@@ -64,6 +77,8 @@ class DesktopPlayer {
     private var seekTarget: Long? = null
     private var seekDeadline = 0L
     private var playWhenReady = true
+    // IDs permitem restaurar só as faixas que continuam na fila, sem recriar removidas.
+    private var unshuffledOrder: List<String> = emptyList()
 
     fun play(songs: List<Song>, index: Int) {
         // Cada ocorrência recebe um ID, mesmo se a mesma música aparecer duas vezes.
@@ -71,20 +86,70 @@ class DesktopPlayer {
         if (index !in queue.indices) return
 
         command {
+            val current = state.value
+            unshuffledOrder = if (current.shuffleEnabled) queue.map { requireNotNull(it.queueEntryId) } else emptyList()
+            val ordered = if (current.shuffleEnabled) {
+                listOf(queue[index]) + shuffledUpcoming(queue.filterIndexed { position, _ -> position != index })
+            } else queue
+            val startIndex = if (current.shuffleEnabled) 0 else index
             mutableState.value = PlaybackState(
-                queue = queue,
-                queueId = state.value.queueId + 1,
-                index = index,
+                queue = ordered,
+                queueId = current.queueId + 1,
+                index = startIndex,
                 isLoading = true,
-                trackId = state.value.trackId,
-                volume = state.value.volume,
+                trackId = current.trackId,
+                volume = current.volume,
+                shuffleEnabled = current.shuffleEnabled,
+                repeatMode = current.repeatMode,
             )
-            startTrack(index)
+            startTrack(startIndex)
         }
     }
 
     fun next() = command {
-        if (state.value.hasNext) startTrack(state.value.index + 1)
+        state.value.nextIndex?.let { startTrack(it) }
+    }
+
+    fun cycleRepeat() = command {
+        val current = state.value
+        mutableState.value = current.copy(repeatMode = when (current.repeatMode) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        })
+    }
+
+    fun toggleShuffle() = command {
+        val current = state.value
+        val from = (current.index + 1).coerceAtLeast(0)
+        val upcoming = current.queue.drop(from)
+        val reordered = if (current.shuffleEnabled) {
+            val remaining = upcoming.associateBy { requireNotNull(it.queueEntryId) }.toMutableMap()
+            val restored = unshuffledOrder.mapNotNull { remaining.remove(it) } +
+                upcoming.filter { it.queueEntryId in remaining }
+            unshuffledOrder = emptyList()
+            // A fila explícita do usuário continua antes do contexto e do rádio.
+            QueueTier.entries.flatMap { tier -> restored.filter { it.queueTier == tier } }
+        } else {
+            unshuffledOrder = current.queue.map { requireNotNull(it.queueEntryId) }
+            shuffledUpcoming(upcoming)
+        }
+        // A faixa atual e o histórico ficam no lugar; não há comando enviado ao VLC.
+        mutableState.value = current.copy(
+            queue = current.queue.take(from) + reordered,
+            shuffleEnabled = !current.shuffleEnabled,
+        )
+    }
+
+    private fun shuffledUpcoming(songs: List<Song>): List<Song> =
+        songs.filter { it.queueTier == QueueTier.USER_QUEUE } +
+            shuffledSection(songs.filter { it.queueTier == QueueTier.CONTEXT }) +
+            shuffledSection(songs.filter { it.queueTier == QueueTier.AUTOPLAY })
+
+    private fun shuffledSection(songs: List<Song>): List<Song> {
+        val shuffled = songs.shuffled()
+        // Como no original, duas ou mais faixas nunca ficam na mesma ordem por acaso.
+        return if (songs.size > 1 && shuffled == songs) shuffled.drop(1) + shuffled.first() else shuffled
     }
 
     fun jumpTo(entryId: String, queueId: Long) = command {
@@ -150,11 +215,16 @@ class DesktopPlayer {
         val current = state.value
         if (current.song == null) return@command
 
-        if (current.positionMs > 3_000 || current.index == 0) {
+        val previous = when {
+            current.index > 0 -> current.index - 1
+            current.repeatMode == RepeatMode.ALL -> current.queue.lastIndex
+            else -> null
+        }
+        if (current.positionMs > 3_000 || previous == null) {
             if (current.canSeek) seekTo(0, current.trackId)
             else startTrack(current.index)
         } else {
-            startTrack(current.index - 1)
+            startTrack(previous)
         }
     }
 
@@ -399,12 +469,20 @@ class DesktopPlayer {
             return
         }
 
-        if (current.hasNext) {
-            println("[Player] Fim da faixa. Avançando na fila.")
-            startTrack(current.index + 1)
-        } else {
-            println("[Player] Fim da fila.")
-            finishQueue()
+        val next = current.nextIndex
+        when {
+            current.repeatMode == RepeatMode.ONE -> {
+                println("[Player] Fim da faixa. Repetindo a música.")
+                startTrack(current.index)
+            }
+            next != null -> {
+                println(if (next == 0) "[Player] Fim da fila. Repetindo a fila." else "[Player] Fim da faixa. Avançando na fila.")
+                startTrack(next)
+            }
+            else -> {
+                println("[Player] Fim da fila.")
+                finishQueue()
+            }
         }
     }
 
@@ -414,10 +492,13 @@ class DesktopPlayer {
         stopMedia()
         seekTarget = null
         playWhenReady = false
+        unshuffledOrder = emptyList()
         mutableState.value = PlaybackState(
             queueId = current.queueId,
             trackId = current.trackId + 1,
             volume = current.volume,
+            shuffleEnabled = current.shuffleEnabled,
+            repeatMode = current.repeatMode,
         )
     }
 

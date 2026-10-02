@@ -278,6 +278,8 @@ private fun DesktopApp(player: DesktopPlayer) {
                 onNext = player::next,
                 onSeek = player::seekTo,
                 onVolume = player::setVolume,
+                onToggleShuffle = player::toggleShuffle,
+                onCycleRepeat = player::cycleRepeat,
                 onQueueSelect = player::jumpTo,
                 onQueueRemove = player::removeFromQueue,
                 onQueueMove = player::moveInQueue,
