@@ -8,6 +8,8 @@ import okhttp3.OkHttpClient
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.State
+import java.io.File
+import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -75,6 +77,24 @@ class DesktopPlayer {
 
     fun next() = command {
         if (state.value.hasNext) startTrack(state.value.index + 1)
+    }
+
+    fun playFiles(files: List<File>) {
+        if (files.isEmpty()) return
+
+        val songs = files.map { selected ->
+            val file = selected.absoluteFile
+            val uri = file.toURI().toString()
+            Song(
+                videoId = "local:$uri",
+                title = file.nameWithoutExtension,
+                artist = "Arquivo local",
+                thumbnailUrl = null,
+                localUri = uri,
+            )
+        }
+        // Reutiliza a mesma fila, o mesmo estado e os mesmos controles.
+        play(songs, 0)
     }
 
     fun previous() = command {
@@ -177,11 +197,28 @@ class DesktopPlayer {
 
         playbackJob = scope.launch {
             try {
-                val source = resolver ?: DesktopStreamResolver(network).also {
-                    resolver = it
+                val localFile = song.localUri?.let { location ->
+                    withContext(Dispatchers.IO) {
+                        val uri = URI(location)
+                        require(uri.scheme.equals("file", ignoreCase = true)) {
+                            "O endereço do arquivo local não é válido."
+                        }
+                        File(uri).also { file ->
+                            check(file.isFile && file.canRead()) {
+                                "O arquivo local não foi encontrado ou não pode ser lido."
+                            }
+                        }
+                    }
                 }
 
-                val stream = source.resolve(song.videoId)
+                val stream = if (localFile == null) {
+                    val source = resolver ?: DesktopStreamResolver(network).also {
+                        resolver = it
+                    }
+                    source.resolve(song.videoId)
+                } else {
+                    null
+                }
                 ensureActive()
 
                 val engine = player ?: run {
@@ -195,10 +232,16 @@ class DesktopPlayer {
                     }
                 }
 
-                val input = HttpAudioMedia(stream, network)
+                val input = stream?.let { HttpAudioMedia(it, network) }
                 media = input
 
-                check(engine.media().play(input)) {
+                val accepted = if (localFile != null) {
+                    // O VLC recebe o caminho real, com espaços e acentos decodificados.
+                    engine.media().play(localFile.absolutePath)
+                } else {
+                    engine.media().play(requireNotNull(input))
+                }
+                check(accepted) {
                     "O VLC recusou o áudio."
                 }
                 engine.audio().setVolume(state.value.volume)
@@ -207,8 +250,8 @@ class DesktopPlayer {
                 var started = false
 
                 while (isActive) {
-                    check(input.failure == null) {
-                        input.failure.orEmpty()
+                    check(input?.failure == null) {
+                        input?.failure.orEmpty()
                     }
 
                     val nativeState = engine.status().state()

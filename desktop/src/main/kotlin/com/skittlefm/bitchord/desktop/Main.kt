@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -60,6 +61,21 @@ fun main() = application {
             }
         },
         visible = !closing,
+        onPreviewKeyEvent = { event ->
+            if (
+                event.type == KeyEventType.KeyDown &&
+                event.key == Key.O && event.isCtrlPressed &&
+                !event.isAltPressed && !event.isShiftPressed
+            ) {
+                AudioFiles.open(
+                    canOpen = { !closing },
+                    onSelected = player::playFiles,
+                )
+                true
+            } else {
+                false
+            }
+        },
         title = "BitChord Windows",
         state = rememberWindowState(
             width = 1100.dp,
