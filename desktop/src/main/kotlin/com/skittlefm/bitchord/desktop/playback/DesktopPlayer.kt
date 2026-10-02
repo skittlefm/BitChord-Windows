@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 data class PlaybackState(
     val queue: List<Song> = emptyList(),
+    // Muda apenas quando outra lista substitui a fila.
+    val queueId: Long = 0,
     val index: Int = -1,
     val isPlaying: Boolean = false,
     val isLoading: Boolean = false,
@@ -66,6 +68,7 @@ class DesktopPlayer {
         command {
             mutableState.value = PlaybackState(
                 queue = queue,
+                queueId = state.value.queueId + 1,
                 index = index,
                 isLoading = true,
                 trackId = state.value.trackId,
@@ -77,6 +80,15 @@ class DesktopPlayer {
 
     fun next() = command {
         if (state.value.hasNext) startTrack(state.value.index + 1)
+    }
+
+    fun jumpTo(index: Int, queueId: Long) = command {
+        val current = state.value
+        // Ignora cliques de uma lista que já foi substituída pelo Ctrl+O
+        // ou pela abertura de outro álbum/playlist.
+        if (current.queueId != queueId || index !in current.queue.indices) return@command
+        // Troca só a faixa: mantém a ordem da fila e o volume.
+        startTrack(index)
     }
 
     fun playFiles(files: List<File>) {

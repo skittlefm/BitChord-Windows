@@ -274,6 +274,7 @@ private fun DesktopApp(player: DesktopPlayer) {
                 onNext = player::next,
                 onSeek = player::seekTo,
                 onVolume = player::setVolume,
+                onQueueSelect = player::jumpTo,
             )
         }
 

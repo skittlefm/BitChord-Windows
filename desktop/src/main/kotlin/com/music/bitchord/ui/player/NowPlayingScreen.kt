@@ -1,16 +1,22 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.*
@@ -24,6 +30,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -46,10 +54,12 @@ fun NowPlayingScreen(
     onNext: () -> Unit,
     onSeek: (Long, Long) -> Unit,
     onVolume: (Int) -> Unit,
+    onQueueSelect: (Int, Long) -> Unit,
 ) {
     // Esta tela apenas lê o estado e envia comandos ao DesktopPlayer existente.
     val song = state.song ?: return
     val focus = remember { FocusRequester() }
+    var queueOpen by rememberSaveable { mutableStateOf(false) }
     var scrub by remember(state.trackId) { mutableStateOf<Float?>(null) }
     val fraction = scrub ?: if (state.durationMs > 0) {
         state.positionMs.toFloat() / state.durationMs
@@ -71,6 +81,12 @@ fun NowPlayingScreen(
 
     LaunchedEffect(Unit) { focus.requestFocus() }
     LaunchedEffect(state.canSeek) { if (!state.canSeek) scrub = null }
+
+    val queueAction: @Composable () -> Unit = {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            QueueToggle(open = queueOpen, onClick = { queueOpen = !queueOpen })
+        }
+    }
 
     val artwork: @Composable (Modifier) -> Unit = { modifier ->
         Box(
@@ -185,7 +201,7 @@ fun NowPlayingScreen(
             .focusRequester(focus)
             .onPreviewKeyEvent {
                 if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) {
-                    onClose()
+                    if (queueOpen) queueOpen = false else onClose()
                     true
                 } else false
             }
@@ -207,21 +223,57 @@ fun NowPlayingScreen(
         val gutter = if (compact) 20.dp else 30.dp
         // Os limites e as duas colunas seguem o layout horizontal do BitChord.
         if (maxWidth > maxHeight && maxWidth >= 560.dp) {
-            Row(Modifier.widthIn(max = 1100.dp).fillMaxSize().padding(top = 24.dp, bottom = 20.dp)) {
-                BoxWithConstraints(
+            Row(Modifier.widthIn(max = 1100.dp).fillMaxSize().padding(top = 24.dp, bottom = if (compact) 8.dp else 20.dp)) {
+                Column(
                     Modifier.weight(1f).fillMaxHeight().padding(horizontal = gutter),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    artwork(Modifier.size(minOf(maxWidth, maxHeight)))
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        artwork(Modifier.size(minOf(maxWidth, maxHeight)))
+                    }
+                    Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
+                    queueAction()
                 }
-                Box(
-                    Modifier.weight(1f).fillMaxHeight().padding(horizontal = gutter)
-                        .verticalScroll(rememberScrollState()),
+                AnimatedContent(
+                    targetState = queueOpen,
+                    transitionSpec = { fadeIn(tween(220, delayMillis = 90)) togetherWith fadeOut(tween(140)) },
                     contentAlignment = Alignment.Center,
-                ) { controls(compact) }
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    label = "playerQueuePane",
+                ) { showQueue ->
+                    if (showQueue) {
+                        PlayerQueue(
+                            state, onQueueSelect,
+                            Modifier.fillMaxSize().padding(horizontal = gutter),
+                        )
+                    } else {
+                        Box(
+                            Modifier.fillMaxSize().padding(horizontal = gutter)
+                                .verticalScroll(rememberScrollState()),
+                            contentAlignment = Alignment.Center,
+                        ) { controls(compact) }
+                    }
+                }
+            }
+        } else if (queueOpen) {
+            // Em uma janela estreita a fila ocupa o espaço da capa,
+            // mantendo os controles de reprodução abaixo, como no original.
+            val paneHeight = maxHeight.coerceAtLeast(480.dp)
+            val compactPortrait = maxHeight < 650.dp
+            Column(
+                Modifier.widthIn(max = 620.dp).fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Column(Modifier.fillMaxWidth().height(paneHeight).padding(horizontal = gutter, vertical = 32.dp)) {
+                    PlayerQueue(state, onQueueSelect, Modifier.weight(1f).fillMaxWidth())
+                    Spacer(Modifier.height(12.dp))
+                    controls(compactPortrait)
+                    Spacer(Modifier.height(12.dp))
+                    queueAction()
+                }
             }
         } else {
-            val artSize = minOf(maxWidth - gutter * 2, (maxHeight - 330.dp).coerceAtLeast(150.dp), 560.dp)
+            val artSize = minOf(maxWidth - gutter * 2, (maxHeight - 386.dp).coerceAtLeast(150.dp), 560.dp)
                 .coerceAtLeast(1.dp)
             Column(
                 Modifier.widthIn(max = 620.dp).fillMaxSize()
@@ -233,6 +285,8 @@ fun NowPlayingScreen(
                 artwork(Modifier.size(artSize))
                 Spacer(Modifier.height(24.dp))
                 controls(false)
+                Spacer(Modifier.height(12.dp))
+                queueAction()
             }
         }
 
@@ -245,6 +299,25 @@ fun NowPlayingScreen(
                 .shadow(2.dp, RoundedCornerShape(3.dp))
                 .background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(3.dp)))
         }
+    }
+}
+
+@Composable
+private fun QueueToggle(open: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape)
+            .background(if (open) Color.White.copy(alpha = 0.20f) else Color.Transparent)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null, role = Role.Button, onClick = onClick,
+            )
+            .semantics { selected = open },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            BitChordIcons.Queue, if (open) "Fechar fila" else "Abrir fila",
+            Modifier.size(26.dp), tint = Color.White.copy(alpha = if (open) 1f else 0.75f),
+        )
     }
 }
 
