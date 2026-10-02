@@ -2,7 +2,6 @@ package com.music.bitchord.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,6 +24,7 @@ import com.skittlefm.bitchord.desktop.playback.PlaybackState
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import androidx.compose.foundation.clickable
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -34,6 +33,7 @@ fun MiniPlayer(
     hazeState: HazeState,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val song = state.song ?: return
@@ -50,7 +50,12 @@ fun MiniPlayer(
                 style = HazeMaterials.thin(colors.surface),
             )
             .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
-            .pointerInput(Unit) { detectTapGestures(onTap = {}) }
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClickLabel = "Abrir player",
+                onClick = onExpand,
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

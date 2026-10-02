@@ -18,9 +18,18 @@ data class PlaybackState(
     val isPlaying: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
+    val requiresVerification: Boolean = false,
+    // Identifica esta reprodução, inclusive quando a mesma música é repetida.
+    val trackId: Long = 0,
+    val positionMs: Long = 0,
+    val durationMs: Long = 0,
+    val isSeekable: Boolean = false,
+    val volume: Int = 100,
 ) {
     val song: Song? get() = queue.getOrNull(index)
     val hasNext: Boolean get() = index >= 0 && index < queue.lastIndex
+    val canSeek: Boolean
+        get() = isSeekable && durationMs > 0 && !isLoading && error == null
 }
 
 class DesktopPlayer {
@@ -45,6 +54,8 @@ class DesktopPlayer {
     private var player: MediaPlayer? = null
     private var media: HttpAudioMedia? = null
     private var playbackJob: Job? = null
+    private var seekTarget: Long? = null
+    private var seekDeadline = 0L
 
     fun play(songs: List<Song>, index: Int) {
         val queue = songs.toList()
@@ -55,6 +66,8 @@ class DesktopPlayer {
                 queue = queue,
                 index = index,
                 isLoading = true,
+                trackId = state.value.trackId,
+                volume = state.value.volume,
             )
             startTrack(index)
         }
@@ -62,6 +75,51 @@ class DesktopPlayer {
 
     fun next() = command {
         if (state.value.hasNext) startTrack(state.value.index + 1)
+    }
+
+    fun previous() = command {
+        val current = state.value
+        if (current.song == null) return@command
+
+        if (current.positionMs > 3_000 || current.index == 0) {
+            if (current.canSeek) seekTo(0, current.trackId)
+            else startTrack(current.index)
+        } else {
+            startTrack(current.index - 1)
+        }
+    }
+
+    fun seekTo(positionMs: Long, trackId: Long) = command {
+        val current = state.value
+        // Um arrasto iniciado na faixa anterior não pode alterar a faixa atual.
+        if (current.trackId != trackId || !current.canSeek) return@command
+        val engine = player ?: return@command
+        if (engine.status().state() !in listOf(State.PLAYING, State.PAUSED)) return@command
+        val target = positionMs.coerceIn(0, current.durationMs)
+
+        engine.controls().setTime(target)
+        seekTarget = target
+        seekDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+        mutableState.value = current.copy(positionMs = target)
+    }
+
+    fun setVolume(value: Int) = command {
+        val volume = value.coerceIn(0, 100)
+        player?.audio()?.setVolume(volume)
+        mutableState.value = state.value.copy(volume = volume)
+    }
+
+    private fun readPosition(engine: MediaPlayer, duration: Long): Long {
+        val measured = engine.status().time().coerceIn(0, duration)
+        // O relógio nativo pode demorar alguns ciclos para confirmar uma busca.
+        seekTarget?.let { target ->
+            if (kotlin.math.abs(measured - target) <= 1_000 ||
+                System.nanoTime() >= seekDeadline
+            ) {
+                seekTarget = null
+            }
+        }
+        return seekTarget ?: measured
     }
 
     fun retry() = command {
@@ -101,12 +159,18 @@ class DesktopPlayer {
     private fun startTrack(index: Int) {
         playbackJob?.cancel()
         stopMedia()
+        seekTarget = null
 
         mutableState.value = state.value.copy(
             index = index,
             isPlaying = false,
             isLoading = true,
             error = null,
+            requiresVerification = false,
+            trackId = state.value.trackId + 1,
+            positionMs = 0,
+            durationMs = 0,
+            isSeekable = false,
         )
 
         val song = requireNotNull(state.value.song)
@@ -137,6 +201,7 @@ class DesktopPlayer {
                 check(engine.media().play(input)) {
                     "O VLC recusou o áudio."
                 }
+                engine.audio().setVolume(state.value.volume)
 
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
                 var started = false
@@ -155,9 +220,14 @@ class DesktopPlayer {
                     when (nativeState) {
                         State.PLAYING, State.PAUSED -> {
                             started = true
+                            val duration = engine.status().length()
+                                .takeIf { it > 0 } ?: state.value.durationMs
                             mutableState.value = state.value.copy(
                                 isPlaying = nativeState == State.PLAYING,
                                 isLoading = false,
+                                positionMs = readPosition(engine, duration),
+                                durationMs = duration,
+                                isSeekable = engine.status().isSeekable(),
                             )
                         }
 
@@ -171,6 +241,8 @@ class DesktopPlayer {
                             mutableState.value = state.value.copy(
                                 isPlaying = false,
                                 isLoading = false,
+                                positionMs = state.value.durationMs,
+                                isSeekable = false,
                             )
 
                             if (state.value.hasNext) {
@@ -184,6 +256,7 @@ class DesktopPlayer {
                             mutableState.value = state.value.copy(
                                 isPlaying = false,
                                 isLoading = false,
+                                isSeekable = false,
                             )
                             return@launch
                         }
@@ -214,10 +287,19 @@ class DesktopPlayer {
     }
 
     private fun fail(error: Throwable) {
-        val message = media?.failure
-            ?: "Não foi possível reproduzir esta música. Tente novamente."
+        val verification = generateSequence(error) { it.cause }
+            .take(16)
+            .any { it is YouTubeVerificationRequiredException }
+
+        val message = if (verification) {
+            "O YouTube solicitou uma verificação para este acesso. Abra a música no site."
+        } else {
+            media?.failure
+                ?: "Não foi possível reproduzir esta música. Tente novamente."
+        }
 
         println("[Player] Falha: ${error.javaClass.simpleName}")
+        error.printStackTrace()
 
         playbackJob?.cancel()
         runCatching { stopMedia() }
@@ -226,6 +308,7 @@ class DesktopPlayer {
             isPlaying = false,
             isLoading = false,
             error = message,
+            requiresVerification = verification,
         )
     }
 

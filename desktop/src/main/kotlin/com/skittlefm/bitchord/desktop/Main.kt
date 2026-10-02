@@ -24,11 +24,17 @@ import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.screens.DetailScreen
 import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.ui.theme.BitChordTheme
+import com.music.bitchord.ui.player.NowPlayingScreen
 import com.skittlefm.bitchord.desktop.playback.DesktopPlayer
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.awt.Desktop
+import java.net.URI
+import java.net.URLEncoder
 
 fun main() = application {
     val player = remember { DesktopPlayer() }
@@ -75,6 +81,7 @@ fun main() = application {
 private fun DesktopApp(player: DesktopPlayer) {
     val playback by player.state.collectAsState()
     val messages = remember { SnackbarHostState() }
+    var showPlayer by remember { mutableStateOf(false) }
 
     var bottomHeight by remember { mutableIntStateOf(0) }
 
@@ -85,14 +92,33 @@ private fun DesktopApp(player: DesktopPlayer) {
 
     LaunchedEffect(playback.error) {
         playback.error?.let { message ->
+            val verification = playback.requiresVerification
+            val videoId = playback.song?.videoId
+
             val result = messages.showSnackbar(
                 message = message,
-                actionLabel = "Tentar novamente",
+                actionLabel = if (verification) "Abrir no YouTube" else "Tentar novamente",
                 withDismissAction = true,
             )
 
             if (result == SnackbarResult.ActionPerformed) {
-                player.retry()
+                if (verification) {
+                    if (videoId != null) {
+                        val opened = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val id = URLEncoder.encode(videoId, "UTF-8")
+                                Desktop.getDesktop().browse(
+                                    URI("https://www.youtube.com/watch?v=$id"),
+                                )
+                            }.isSuccess
+                        }
+                        if (!opened) {
+                            messages.showSnackbar("Não foi possível abrir o navegador.")
+                        }
+                    }
+                } else {
+                    player.retry()
+                }
             }
         }
     }
@@ -198,14 +224,13 @@ private fun DesktopApp(player: DesktopPlayer) {
                 .fillMaxWidth()
                 .onSizeChanged { bottomHeight = it.height },
         ) {
-            SnackbarHost(hostState = messages)
-
             if (playback.song != null) {
                 MiniPlayer(
                     state = playback,
                     hazeState = hazeState,
                     onPlayPause = player::togglePlayPause,
                     onNext = player::next,
+                    onExpand = { showPlayer = true },
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -223,5 +248,24 @@ private fun DesktopApp(player: DesktopPlayer) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        if (showPlayer && playback.song != null) {
+            NowPlayingScreen(
+                state = playback,
+                onClose = { showPlayer = false },
+                onPlayPause = player::togglePlayPause,
+                onPrevious = player::previous,
+                onNext = player::next,
+                onSeek = player::seekTo,
+                onVolume = player::setVolume,
+            )
+        }
+
+        SnackbarHost(
+            hostState = messages,
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .widthIn(max = 560.dp).fillMaxWidth()
+                .padding(bottom = if (showPlayer) 16.dp else bottomPadding),
+        )
     }
 }

@@ -20,9 +20,42 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
+class YouTubeVerificationRequiredException : java.net.ProtocolException(
+    "O YouTube solicitou uma verificação para este acesso.",
+)
+
 class DesktopStreamResolver(network: OkHttpClient) {
     private val http = HttpClient(OkHttp) {
-        engine { preconfigured = network }
+        engine {
+            preconfigured = network
+
+            addNetworkInterceptor { chain ->
+                val request = chain.request()
+                val response = chain.proceed(request)
+
+                if (response.code in listOf(301, 302, 303, 307, 308)) {
+                    val from = request.url
+                    val target = response.header("Location")?.let { from.resolve(it) }
+                    val origin = "${from.scheme}://${from.host}:${from.port}${from.encodedPath}"
+                    val destination = target?.let {
+                        "${it.scheme}://${it.host}:${it.port}${it.encodedPath}"
+                    } ?: "Location ausente ou inválido"
+
+                    println("[HTTP] ${response.code}: $origin -> $destination")
+
+                    if (
+                        target != null &&
+                        target.host in setOf("www.google.com", "google.com") &&
+                        target.encodedPath.startsWith("/sorry/")
+                    ) {
+                        response.close()
+                        throw YouTubeVerificationRequiredException()
+                    }
+                }
+
+                response
+            }
+        }
 
         install(ContentNegotiation) {
             json(Json {
