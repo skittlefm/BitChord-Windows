@@ -99,6 +99,10 @@ private fun DesktopApp(player: DesktopPlayer) {
     val messages = remember { SnackbarHostState() }
     var showPlayer by remember { mutableStateOf(false) }
 
+    LaunchedEffect(playback.song == null) {
+        if (playback.song == null) showPlayer = false
+    }
+
     var bottomHeight by remember { mutableIntStateOf(0) }
 
     val bottomPadding = maxOf(
@@ -275,6 +279,8 @@ private fun DesktopApp(player: DesktopPlayer) {
                 onSeek = player::seekTo,
                 onVolume = player::setVolume,
                 onQueueSelect = player::jumpTo,
+                onQueueRemove = player::removeFromQueue,
+                onQueueMove = player::moveInQueue,
             )
         }
 

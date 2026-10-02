@@ -7,9 +7,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
+import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 import uk.co.caprica.vlcj.player.base.State
 import java.io.File
 import java.net.URI
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -56,13 +58,16 @@ class DesktopPlayer {
     private var resolver: DesktopStreamResolver? = null
     private var factory: MediaPlayerFactory? = null
     private var player: MediaPlayer? = null
+    private var playbackEvents: MediaPlayerEventAdapter? = null
     private var media: HttpAudioMedia? = null
     private var playbackJob: Job? = null
     private var seekTarget: Long? = null
     private var seekDeadline = 0L
+    private var playWhenReady = true
 
     fun play(songs: List<Song>, index: Int) {
-        val queue = songs.toList()
+        // Cada ocorrência recebe um ID, mesmo se a mesma música aparecer duas vezes.
+        val queue = songs.map { it.copy(queueEntryId = UUID.randomUUID().toString()) }
         if (index !in queue.indices) return
 
         command {
@@ -82,13 +87,45 @@ class DesktopPlayer {
         if (state.value.hasNext) startTrack(state.value.index + 1)
     }
 
-    fun jumpTo(index: Int, queueId: Long) = command {
+    fun jumpTo(entryId: String, queueId: Long) = command {
         val current = state.value
-        // Ignora cliques de uma lista que já foi substituída pelo Ctrl+O
-        // ou pela abertura de outro álbum/playlist.
-        if (current.queueId != queueId || index !in current.queue.indices) return@command
-        // Troca só a faixa: mantém a ordem da fila e o volume.
+        if (current.queueId != queueId) return@command
+        val index = current.queue.indexOfFirst { it.queueEntryId == entryId }
+        if (index < 0) return@command
         startTrack(index)
+    }
+
+    fun removeFromQueue(entryId: String, queueId: Long) = command {
+        val current = state.value
+        if (current.queueId != queueId) return@command
+        val removed = current.queue.indexOfFirst { it.queueEntryId == entryId }
+        if (removed < 0) return@command
+        val queue = current.queue.toMutableList().apply { removeAt(removed) }.toList()
+
+        if (removed != current.index) {
+            // Editar outra faixa não toca no VLC nem reinicia o áudio atual.
+            mutableState.value = current.copy(
+                queue = queue,
+                index = if (removed < current.index) current.index - 1 else current.index,
+            )
+        } else if (removed < queue.size) {
+            // A próxima ocupa o lugar da removida. Preserva a intenção de pausa.
+            startTrack(removed, autoPlay = playWhenReady, queue = queue)
+        } else {
+            finishQueue()
+        }
+    }
+
+    fun moveInQueue(entryId: String, targetId: String, queueId: Long) = command {
+        val current = state.value
+        if (current.queueId != queueId) return@command
+        val from = current.queue.indexOfFirst { it.queueEntryId == entryId }
+        val to = current.queue.indexOfFirst { it.queueEntryId == targetId }
+        // Só as próximas faixas são arrastáveis; a atual fica no lugar.
+        if (from <= current.index || to <= current.index || from == to) return@command
+        val queue = current.queue.toMutableList()
+        queue.add(to, queue.removeAt(from))
+        mutableState.value = current.copy(queue = queue.toList())
     }
 
     fun playFiles(files: List<File>) {
@@ -170,6 +207,7 @@ class DesktopPlayer {
             startTrack(current.index)
         } else {
             player?.controls()?.setPause(current.isPlaying)
+            playWhenReady = !current.isPlaying
             mutableState.value = current.copy(isPlaying = !current.isPlaying)
         }
     }
@@ -188,12 +226,14 @@ class DesktopPlayer {
         }
     }
 
-    private fun startTrack(index: Int) {
+    private fun startTrack(index: Int, autoPlay: Boolean = true, queue: List<Song> = state.value.queue) {
         playbackJob?.cancel()
         stopMedia()
         seekTarget = null
+        playWhenReady = autoPlay
 
         mutableState.value = state.value.copy(
+            queue = queue,
             index = index,
             isPlaying = false,
             isLoading = true,
@@ -206,6 +246,7 @@ class DesktopPlayer {
         )
 
         val song = requireNotNull(state.value.song)
+        val trackId = state.value.trackId
 
         playbackJob = scope.launch {
             try {
@@ -246,12 +287,14 @@ class DesktopPlayer {
 
                 val input = stream?.let { HttpAudioMedia(it, network) }
                 media = input
+                observePlayback(engine, trackId)
 
+                val options = if (autoPlay) emptyArray() else arrayOf("start-paused")
                 val accepted = if (localFile != null) {
                     // O VLC recebe o caminho real, com espaços e acentos decodificados.
-                    engine.media().play(localFile.absolutePath)
+                    engine.media().play(localFile.absolutePath, *options)
                 } else {
-                    engine.media().play(requireNotNull(input))
+                    engine.media().play(requireNotNull(input), *options)
                 }
                 check(accepted) {
                     "O VLC recusou o áudio."
@@ -293,17 +336,8 @@ class DesktopPlayer {
                         }
 
                         State.ENDED -> if (started) {
-                            mutableState.value = state.value.copy(
-                                isPlaying = false,
-                                isLoading = false,
-                                positionMs = state.value.durationMs,
-                                isSeekable = false,
-                            )
-
-                            if (state.value.hasNext) {
-                                startTrack(state.value.index + 1)
-                            }
-
+                            // Mantém a consulta como apoio ao evento de término.
+                            trackFinished(trackId)
                             return@launch
                         }
 
@@ -335,7 +369,62 @@ class DesktopPlayer {
         }
     }
 
+    private fun observePlayback(engine: MediaPlayer, trackId: Long) {
+        val listener = object : MediaPlayerEventAdapter() {
+            override fun finished(mediaPlayer: MediaPlayer) {
+                // O callback nativo só agenda trabalho; os comandos do VLC
+                // ficam na nossa thread de áudio.
+                command { trackFinished(trackId) }
+            }
+
+            override fun error(mediaPlayer: MediaPlayer) {
+                command {
+                    val current = state.value
+                    if (current.trackId == trackId && current.song != null && current.error == null) {
+                        fail(IllegalStateException("O VLC informou um erro."))
+                    }
+                }
+            }
+        }
+        playbackEvents = listener
+        engine.events().addMediaPlayerEventListener(listener)
+    }
+
+    private fun trackFinished(trackId: Long) {
+        val current = state.value
+        // Eventos repetidos ou atrasados da faixa anterior não pulam outra música.
+        if (current.trackId != trackId || current.song == null || current.error != null) return
+        media?.failure?.let {
+            fail(IllegalStateException(it))
+            return
+        }
+
+        if (current.hasNext) {
+            println("[Player] Fim da faixa. Avançando na fila.")
+            startTrack(current.index + 1)
+        } else {
+            println("[Player] Fim da fila.")
+            finishQueue()
+        }
+    }
+
+    private fun finishQueue() {
+        val current = state.value
+        playbackJob?.cancel()
+        stopMedia()
+        seekTarget = null
+        playWhenReady = false
+        mutableState.value = PlaybackState(
+            queueId = current.queueId,
+            trackId = current.trackId + 1,
+            volume = current.volume,
+        )
+    }
+
     private fun stopMedia() {
+        // Desliga os eventos antigos antes da parada ou troca de mídia.
+        playbackEvents?.let { player?.events()?.removeMediaPlayerEventListener(it) }
+        playbackEvents = null
         media?.cancel()
         player?.controls()?.stop()
         media = null

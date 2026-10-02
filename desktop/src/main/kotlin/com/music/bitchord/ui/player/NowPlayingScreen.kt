@@ -54,7 +54,9 @@ fun NowPlayingScreen(
     onNext: () -> Unit,
     onSeek: (Long, Long) -> Unit,
     onVolume: (Int) -> Unit,
-    onQueueSelect: (Int, Long) -> Unit,
+    onQueueSelect: (String, Long) -> Unit,
+    onQueueRemove: (String, Long) -> Unit,
+    onQueueMove: (String, String, Long) -> Unit,
 ) {
     // Esta tela apenas lê o estado e envia comandos ao DesktopPlayer existente.
     val song = state.song ?: return
@@ -243,7 +245,7 @@ fun NowPlayingScreen(
                 ) { showQueue ->
                     if (showQueue) {
                         PlayerQueue(
-                            state, onQueueSelect,
+                            state, onQueueSelect, onQueueRemove, onQueueMove,
                             Modifier.fillMaxSize().padding(horizontal = gutter),
                         )
                     } else {
@@ -265,7 +267,7 @@ fun NowPlayingScreen(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Column(Modifier.fillMaxWidth().height(paneHeight).padding(horizontal = gutter, vertical = 32.dp)) {
-                    PlayerQueue(state, onQueueSelect, Modifier.weight(1f).fillMaxWidth())
+                    PlayerQueue(state, onQueueSelect, onQueueRemove, onQueueMove, Modifier.weight(1f).fillMaxWidth())
                     Spacer(Modifier.height(12.dp))
                     controls(compactPortrait)
                     Spacer(Modifier.height(12.dp))
